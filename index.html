@@ -9,768 +9,400 @@
     <h1>Nguyễn Phạm Hoàng Tuấn - Thứ Năm - Ca 2</h1>
 
     Thi cuối kỳ
-<?php
+
+
+    <?php
 session_start();
 
-// KIỂM TRA ĐĂNG NHẬP
+// Kiểm tra đăng nhập
 if (!isset($_SESSION['user_logged_in'])) {
     header('Location: login.php');
     exit;
 }
-
-// === LOGIC CHỌN PHÒNG ===
-// Nếu người dùng vào trang index với room_id (từ trang room.php)
-if (isset($_GET['room_id']) && isset($_GET['room_name']) && isset($_GET['room_type']) && isset($_GET['price'])) {
-    // Lưu thông tin phòng vào session
-    $_SESSION['current_room_id'] = $_GET['room_id'];
-    $_SESSION['current_room_name'] = $_GET['room_name'];
-    $_SESSION['current_room_type'] = $_GET['room_type'];
-    $_SESSION['current_room_price'] = $_GET['price']; // Store the price
-    // Chuyển hướng để xóa query string khỏi URL, giúp tránh tạo lại đơn hàng khi refresh
-    header('Location: index.php');
-    exit;
-}
-
-// Nếu không có phòng nào được chọn trong session, quay lại trang chọn phòng
-if (!isset($_SESSION['current_room_id'])) {
-    header('Location: room.php');
-    exit;
-}
-
-// Lấy thông tin phòng từ session
-$currentRoomId = $_SESSION['current_room_id'];
-$currentRoomName = $_SESSION['current_room_name'];
-$currentRoomType = $_SESSION['current_room_type'];
-$currentRoomPrice = isset($_SESSION['current_room_price']) ? $_SESSION['current_room_price'] : 0; // Get the price
 $currentUser = $_SESSION['username'];
 
-// Khởi tạo session orders nếu chưa tồn tại
+// Khởi tạo session cho đơn hàng nếu chưa có
 if (!isset($_SESSION['orders'])) {
     $_SESSION['orders'] = [];
 }
 
-// Lấy dữ liệu giỏ hàng và khách hàng đã lưu của phòng (nếu có)
-$initial_cart = [];
-$initial_customer = ['id' => 0, 'name' => 'Khách lẻ', 'phone' => '', 'email' => ''];
-$initial_rented_duration = 0; // Default to 0 hours
+// Include the data file
+include 'data.php';
 
-if (isset($_SESSION['orders'][$currentRoomId])) {
-    $order_data = $_SESSION['orders'][$currentRoomId];
-    if (isset($order_data['cart'])) {
-        $initial_cart = $order_data['cart'];
+// Lấy giá trị tìm kiếm
+$search_name = isset($_GET['name']) ? trim($_GET['name']) : '';
+$search_type = isset($_GET['type']) ? trim($_GET['type']) : '';
+$search_price = isset($_GET['price']) ? trim($_GET['price']) : '';
+$search_status = isset($_GET['status']) ? trim($_GET['status']) : 'all'; // Default to 'all'
+
+// Lọc danh sách phòng
+$filtered_rooms = $rooms;
+if (!empty($search_name)) {
+    $filtered_rooms = array_filter($filtered_rooms, function($room) use ($search_name) {
+        return stripos($room['name'], $search_name) !== false;
+    });
+}
+if (!empty($search_type)) {
+    $filtered_rooms = array_filter($filtered_rooms, function($room) use ($search_type) {
+        return stripos($room['type'], $search_type) !== false;
+    });
+}
+if (!empty($search_price)) {
+    $filtered_rooms = array_filter($filtered_rooms, function($room) use ($search_price) {
+        return $room['price'] <= (int)$search_price;
+    });
+}
+
+
+// Cập nhật trạng thái phòng dựa trên session và lọc theo trạng thái tìm kiếm
+if (!empty($filtered_rooms)) {
+    foreach ($filtered_rooms as &$room) { // Dùng tham chiếu `&` để thay đổi trực tiếp mảng
+        // Kiểm tra nếu có đơn hàng cho phòng này và giỏ hàng không rỗng
+        if (isset($_SESSION['orders'][$room['id']]) && !empty($_SESSION['orders'][$room['id']]['cart'])) {
+            $room['status'] = 'occupied';
+            if (!isset($_SESSION['orders'][$room['id']]['start_time'])) {
+                $_SESSION['orders'][$room['id']]['start_time'] = time();
+            }
+        } else {
+            $room['status'] = 'empty';
+        }
     }
-    if (isset($order_data['customer'])) {
-        $initial_customer = $order_data['customer'];
-    }
-    if (isset($order_data['initial_rented_duration'])) {
-        $initial_rented_duration = $order_data['initial_rented_duration'];
+    unset($room); // Hủy tham chiếu sau khi vòng lặp kết thúc
+
+    // Lọc theo trạng thái đã chọn từ form tìm kiếm
+    if ($search_status !== 'all') {
+        $filtered_rooms = array_filter($filtered_rooms, function($room) use ($search_status) {
+            return $room['status'] === $search_status;
+        });
     }
 }
-?>
 
-<?php
-// --- MOCK DATA ---
-include 'menu_data.php';
 
-// Dữ liệu khách hàng mẫu
-$customers = [
-    ['id' => 1, 'name' => 'Nguyễn Văn An', 'phone' => '0909123456', 'email' => 'nguyenvana@example.com'],
-   
-];
+// Lấy thông báo từ session nếu có
+$message = null;
+if (isset($_SESSION['message'])) {
+    $message = $_SESSION['message'];
+    unset($_SESSION['message']); // Xóa thông báo sau khi lấy
+}
+
 ?>
 
 <!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>POS System</title>
+    <title>Danh sách phòng - POS</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
-        :root { --bg-dark: #22252b; --text-white: #fff; --accent: #26a69a; --border: #3f4452; }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Roboto', sans-serif; user-select: none; }
-        body { background: var(--bg-dark); color: var(--text-white); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        body { background-color: #f4f6f9; font-family: 'Roboto', sans-serif; margin: 0; }
+        
+        /* HEADER */
+        .header { background: #fff; height: 60px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .header-title { color: #007bff; font-weight: bold; font-size: 20px; }
+        .user-info { display: flex; align-items: center; gap: 10px; }
+        .avatar { width: 35px; height: 35px; background: #00aefd; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; }
 
-        /* Header */
-        header { height: 50px; background: #30343d; display: flex; align-items: center; justify-content: space-between; padding: 0 15px; border-bottom: 1px solid #000; }
+        /* MAIN CONTENT */
+        .container { padding: 20px; }
+        .toolbar { background: #fff; padding: 15px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border: 1px solid #e0e0e0; }
         
-        .main-view { display: flex; height: calc(100vh - 50px); }
+        /* Search Toolbar */
+        .search-toolbar { background: #fff; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #e0e0e0; }
+        .search-toolbar form { display: flex; align-items: center; gap: 15px; }
+        .search-toolbar input[type="text"], .search-toolbar input[type="number"] { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        .search-toolbar button { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .search-toolbar .search-btn { background: #007bff; color: white; }
+        .search-toolbar .reset-btn { background: #6c757d; color: white; }
+
+        /* GRID PHÒNG */
+        .room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
         
-        /* CỘT TRÁI */
-        .left-panel { width: 380px; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: #2e323d; }
-        
-        /* Thanh chọn khách hàng */
-        .customer-bar {
-            padding: 10px;
-            background: #2e323d;
-            border-bottom: 1px solid var(--border);
+        .room-card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px;
             cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            justify-content: space-between;
-            color: var(--accent);
+            text-decoration: none; /* Bỏ gạch chân link */
+            color: #333;
+        }
+        .room-card:hover { transform: translateY(-5px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+
+        /* TRẠNG THÁI: TRỐNG (Màu xanh) */
+        .room-card.empty { border: 1px solid #69f0ae; }
+        .room-card.empty .icon-status { color: #69f0ae; }
+        .room-card.empty .room-name { color: #2e7d32; }
+        .room-card.empty .badge { background: #69f0ae; color: #fff; }
+
+        /* TRẠNG THÁI: CÓ KHÁCH (Màu đỏ) */
+        .room-card.occupied { border: 1px solid #ff8a80; }
+        .room-card.occupied .icon-status { color: #ff5252; }
+        .room-card.occupied .room-name { color: #d32f2f; }
+        .room-card.occupied .badge { background: #ff5252; color: #fff; }
+
+        /* Icon to ở giữa */
+        .icon-status { font-size: 40px; margin-bottom: 10px; }
+        .room-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+        .room-type { font-size: 13px; color: #666; display: flex; align-items: center; gap: 5px; }
+        .room-price { font-size: 14px; color: #007bff; font-weight: 500; margin-top: 5px; }
+        .room-timer { font-size: 14px; color: #333; font-weight: 500; margin-top: 10px; }
+
+        /* Badge góc phải */
+        .badge { position: absolute; top: 10px; right: 10px; font-size: 11px; padding: 3px 8px; border-radius: 10px; font-weight: bold; }
+        
+        .delete-btn {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background: #ff4d4d;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 25px;
+            height: 25px;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 25px;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .room-card:hover .delete-btn {
+            opacity: 1;
+        }
+
+        /* FOOTER CHÚ THÍCH */
+        .legend { margin-top: 30px; display: flex; gap: 20px; font-size: 14px; background: #fff; padding: 15px; border-radius: 5px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        
+        /* Modal styles */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0;
+            top: 0;
+            width: 100%; 
+            height: 100%; 
+            overflow: auto; 
+            background-color: rgba(0,0,0,0.5); 
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 10% auto; 
+            padding: 30px;
+            border: 1px solid #888;
+            width: 90%; 
+            max-width: 450px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            animation: slide-down 0.3s ease-out;
+        }
+        @keyframes slide-down {
+            from { transform: translateY(-30px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
             font-weight: bold;
         }
-        .customer-bar:hover { background: #3e434e; }
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .modal h2 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .modal form label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #555;
+        }
+        .modal form input[type="text"], .modal form input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box; /* Important */
+            margin-bottom: 15px;
+        }
+        .modal form input[type="submit"] {
+            background-color: #28a745;
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 16px;
+        }
+        .modal form input[type="submit"]:hover {
+            background-color: #218838;
+        }
 
-        .cart-list { flex: 1; overflow-y: auto; background: #fff; color: #333; position: relative; }
-        .cart-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; transition: 0.1s; }
-        .cart-item.active { background: #e3f2fd; border-left: 4px solid var(--accent); }
-        .item-info { flex: 1; }
-        .item-total { font-weight: bold; display: flex; flex-direction: column; align-items: flex-end; }
-        .discount-tag { color: #d32f2f; font-size: 11px; font-style: italic; }
+        /* Notification Message */
+        .notification {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            color: #fff;
+            position: relative;
+            opacity: 1;
+            transition: opacity 0.5s;
+        }
+        .notification.success { background-color: #28a745; }
+        .notification.error { background-color: #dc3545; }
+        .notification .close-notif {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            color: #fff;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+        }
 
-        .numpad-area { height: 280px; display: grid; grid-template-columns: 3fr 1fr; border-top: 1px solid #000; background: #222; }
-        .keys-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #000; }
-        .key-btn { background: #2e323d; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; cursor: pointer; }
-        .key-btn:active { background: #444; }
-
-        .modes-col { display: flex; flex-direction: column; gap: 1px; background: #000; }
-        .mode-btn { background: #2e323d; color: #ccc; flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px; font-weight: bold; }
-        .mode-btn.active { background: var(--accent); color: #fff; }
-        
-        .action-row { display: flex; height: 50px; gap: 1px; background: #000; }
-        .btn-action { border: none; font-size: 16px; cursor: pointer; color: #fff; font-weight: bold; }
-        .btn-cancel { width: 60px; background: #d32f2f; } /* Hủy đơn */
-        .btn-delete-item { width: 80px; background: #e67e22; } /* Xóa món */
-        .btn-payment { flex: 1; background: var(--accent); font-size: 18px; }
-
-        /* CỘT PHẢI */
-        .right-panel { flex: 1; display: flex; flex-direction: column; padding: 15px; overflow: hidden; }
-        .cat-bar { display: flex; gap: 10px; margin-bottom: 15px; overflow-x: auto; padding-bottom: 5px; }
-        .cat-btn { padding: 10px 20px; border-radius: 4px; color: #222; font-weight: bold; cursor: pointer; white-space: nowrap; opacity: 0.7; }
-        .cat-btn.active { opacity: 1; border: 2px solid #fff; }
-
-        .prod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; overflow-y: auto; }
-        .prod-card { background: #2e323d; height: 100px; border-radius: 4px; position: relative; cursor: pointer; display: flex; flex-direction: column; overflow: hidden; }
-        .prod-card.has-img { background: #fff; }
-        .prod-card.has-img img { width: 100%; height: 70px; object-fit: contain; }
-        .prod-card.has-img .name { background: #2e323d; color: #fff; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
-        .prod-card.text-only { align-items: center; justify-content: center; text-align: center; padding: 5px; font-size: 13px; }
-        .prod-border { position: absolute; bottom: 0; width: 100%; height: 4px; }
-        .price-badge { position: absolute; top: 0; right: 0; background: rgba(0,0,0,0.7); font-size: 10px; padding: 2px 4px; color: #fff; }
-
-        /* MODAL CHUNG */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; justify-content: center; align-items: center; }
-        .modal-content { background: #2e323d; padding: 20px; border-radius: 5px; width: 600px; max-height: 80vh; display: flex; flex-direction: column; }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; }
-        
-        /* Modal Thanh Toán */
-        #modal-payment .modal-content { width: 800px; flex-direction: row; padding: 0; overflow-y: auto; height: 500px; }
-        .pay-left { width: 350px; background: #222; padding: 30px; border-right: 1px solid #444; }
-        .pay-right { flex: 1; padding: 30px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #2e323d; }
-        
-        /* Modal Khách Hàng */
-        .customer-list { flex: 1; overflow-y: auto; margin-top: 10px; max-height: 300px; }
-        .cust-item { padding: 10px; border-bottom: 1px solid #444; cursor: pointer; display: flex; justify-content: space-between; }
-        .cust-item:hover { background: #3e434e; }
-        .cust-input { width: 100%; padding: 10px; background: #1a1c23; border: 1px solid #444; color: #fff; border-radius: 4px; margin-bottom: 10px; }
-        
-        /* Numpad Payment */
-        .numpad-pay { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
-        .np-btn { height: 60px; background: #333; color: #fff; font-size: 22px; display: flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 4px; }
-        .np-btn:active { background: #555; }
-        
-        .total-huge { font-size: 40px; font-weight: bold; margin-bottom: 20px; color: var(--accent); }
     </style>
 </head>
 <body>
 
-   <header>
-    <div style="font-weight: bold;">
-        <a href="room.php" title="Quay về danh sách phòng" style="color: white; text-decoration: none;">
-            <i class="fa fa-th"></i>
-        </a>
-        <span style="margin-left: 15px;">Phòng: <?= htmlspecialchars($currentRoomName) ?></span>
-        <span id="room-timer" style="margin-left: 20px; color: #ffc107;"></span>
-        <button id="stop-timer-btn" onclick="stopRoomTimer()" style="background: #e67e22; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; margin-left: 10px; font-size: 13px;">
-            <i class="fa fa-pause-circle"></i> Dừng tính giờ
-        </button>
-    </div>
-    <div style="display: flex; align-items: center; gap: 15px;">
-        <div style="display: flex; align-items: center; gap: 5px;">
-            <div style="width: 30px; height: 30px; background: #7e57c2; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold;">
-                <?= strtoupper(substr($currentUser, 0, 1)) ?>
-            </div>
-            <span><?= $currentUser ?></span>
+    <div class="header">
+        <div class="header-title"><i class="fa fa-th-large"></i> Chọn Phòng</div>
+        <div class="user-info">
+            <span><?= htmlspecialchars($currentUser) ?></span>
+            <div class="avatar" title="<?= htmlspecialchars($currentUser) ?>"><?= strtoupper(substr($currentUser, 0, 1)) ?></div>
+            <a href="logout.php" style="color: #d32f2f; font-size: 1.2em;" title="Đăng xuất"><i class="fa fa-sign-out-alt"></i></a>
         </div>
-        <a href="logout.php" style="background: #d32f2f; color: white; padding: 5px 10px; border-radius: 4px; text-decoration: none; font-size: 13px;">
-            <i class="fa fa-sign-out-alt"></i> Thoát
-        </a>
     </div>
-</header>
-<input type="hidden" id="room-price" value="<?= isset($_SESSION['orders'][$currentRoomId]['price']) ? $_SESSION['orders'][$currentRoomId]['price'] : 0 ?>">
 
-
-    <div class="main-view">
-        <div class="left-panel">
-            <div class="customer-bar" onclick="openCustomerModal()">
-                <span id="current-customer-name"><i class="fa fa-user"></i> Khách </span>
-                <i class="fa fa-chevron-right" style="font-size: 12px;"></i>
+    <div class="container">
+        <?php if ($message): ?>
+            <div id="notification-banner" class="notification <?= $message['type'] ?>">
+                <span class="close-notif" onclick="this.parentElement.style.display='none';">&times;</span>
+                <?= htmlspecialchars($message['text']) ?>
             </div>
+        <?php endif; ?>
 
-            <div class="cart-list" id="cart-container"></div>
-
-            <div class="numpad-area">
-                <div class="keys-grid">
-                    <div class="key-btn" onclick="pressNum(1)">1</div>
-                    <div class="key-btn" onclick="pressNum(2)">2</div>
-                    <div class="key-btn" onclick="pressNum(3)">3</div>
-                    <div class="key-btn" onclick="pressNum(4)">4</div>
-                    <div class="key-btn" onclick="pressNum(5)">5</div>
-                    <div class="key-btn" onclick="pressNum(6)">6</div>
-                    <div class="key-btn" onclick="pressNum(7)">7</div>
-                    <div class="key-btn" onclick="pressNum(8)">8</div>
-                    <div class="key-btn" onclick="pressNum(9)">9</div>
-                    <div class="key-btn" onclick="pressNum('+/-')">+/-</div>
-                    <div class="key-btn" onclick="pressNum(0)">0</div>
-                    <div class="key-btn" onclick="pressNum('.')">.</div>
-                </div>
-                <div class="modes-col">
-                    <div class="mode-btn active" id="mode-qty" onclick="setMode('qty')">SL</div>
-                    <div class="mode-btn" id="mode-disc" onclick="setMode('disc')">% Giảm</div>
-                    <div class="mode-btn" id="mode-price" onclick="setMode('price')">Giá</div>
-                    <div class="mode-btn" onclick="pressBackspace()"><i class="fa fa-backspace"></i></div>
-                </div>
-            </div>
-
-            <div class="action-row">
-                <button class="btn-action btn-cancel" onclick="cancelOrder()" title="Hủy đơn hàng"><i class="fa fa-trash"></i></button>
-                <button class="btn-action btn-delete-item" onclick="deleteCurrentItem()" title="Xóa dòng đang chọn">Xóa món</button>
-                <button class="btn-action btn-payment" onclick="openPayment()">Thanh Toán</button>
+        <div class="toolbar">
+            <div style="font-weight: bold;"><i class="fa fa-th"></i> Danh sách phòng</div>
+            <div>
+                <button id="addRoomBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-right: 10px; font-size: 14px; font-weight: 500; display: inline-block; vertical-align: middle;">
+                    <i class="fa fa-plus"></i> Thêm phòng
+                </button>
+                <a href="statistics.php" style="background: #ffc107; color: #212529; text-decoration: none; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-right: 10px; font-size: 14px; font-weight: 500; display: inline-block; vertical-align: middle;">
+                    <i class="fa fa-chart-bar"></i> Thống kê
+                </a>
+                <a href="menu.php" style="background: #17a2b8; color: white; text-decoration: none; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-right: 10px; font-size: 14px; font-weight: 500; display: inline-block; vertical-align: middle;">
+                    <i class="fa fa-utensils"></i> Quản lý Menu
+                </a>
+                <button onclick="location.reload()" style="background: #007bff; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 14px; vertical-align: middle;">
+                    <i class="fa fa-sync"></i> Làm mới
+                </button>
             </div>
         </div>
 
-        <div class="right-panel">
-            <div class="cat-bar">
-                <?php foreach($categories as $c): ?>
-                    <div class="cat-btn" style="background: <?= $c['bg'] ?>" onclick="filterCat(this, '<?= $c['id'] ?>')">
-                        <?= $c['name'] ?>
-                    </div>
-                <?php endforeach; ?>
-            </div>
+        <!-- Search Form -->
+        <div class="search-toolbar">
+            <form action="room.php" method="GET">
+                <input type="text" name="name" placeholder="Tên phòng..." value="<?= htmlspecialchars($search_name) ?>">
+                <input type="text" name="type" placeholder="Loại phòng..." value="<?= htmlspecialchars($search_type) ?>">
+                <input type="number" name="price" placeholder="Giá tối đa..." value="<?= htmlspecialchars($search_price) ?>">
+                <select name="status">
+                    <option value="all" <?= $search_status == 'all' ? 'selected' : '' ?>>Tất cả trạng thái</option>
+                    <option value="empty" <?= $search_status == 'empty' ? 'selected' : '' ?>>Trống</option>
+                    <option value="occupied" <?= $search_status == 'occupied' ? 'selected' : '' ?>>Có khách</option>
+                </select>
+                <button type="submit" class="search-btn"><i class="fa fa-search"></i> Tìm kiếm</button>
+                <a href="room.php" class="reset-btn" style="text-decoration: none; padding: 8px 15px;">Làm mới</a>
+            </form>
+        </div>
 
-            <div class="prod-grid">
-                <?php foreach($products as $p): ?>
-                    <div class="prod-card <?= $p['type']=='text'?'text-only':'has-img' ?>" 
-                         data-cat="<?= $p['cat'] ?>"
-                         onclick="addProduct(<?= $p['id'] ?>, '<?= $p['name'] ?>', <?= $p['price'] ?>, '<?= $p['cat'] ?>', <?= $p['duration'] ?? 0 ?>)">
-                        <?php if($p['type']=='text'): ?>
-                            <div><?= $p['name'] ?></div>
-                        <?php else: ?>
-                            <img src="<?= $p['img'] ?>">
-                            <div class="name"><?= $p['name'] ?></div>
+
+        <div class="room-grid">
+            <?php if (!empty($filtered_rooms)): foreach ($filtered_rooms as $room): ?>
+                <?php 
+                    // Xác định class CSS dựa trên trạng thái
+                    $statusClass = ($room['status'] == 'occupied') ? 'occupied' : 'empty';
+                    $statusText  = ($room['status'] == 'occupied') ? 'Có khách' : 'Trống';
+                    $iconClass   = ($room['status'] == 'occupied') ? 'fa-users' : 'fa-check-circle';
+                    $startTime = isset($_SESSION['orders'][$room['id']]['start_time']) ? $_SESSION['orders'][$room['id']]['start_time'] : 0;
+                    $endTime = isset($_SESSION['orders'][$room['id']]['end_time']) ? $_SESSION['orders'][$room['id']['end_time']] : 0;
+                ?>
+                
+                <div class="room-card <?= $statusClass ?>" 
+                    data-start-time="<?= $startTime > 0 ? $startTime : '' ?>"
+                    data-end-time="<?= $endTime > 0 ? $endTime : '' ?>">
+                    <a href="delete_room.php?id=<?= $room['id'] ?>" class="delete-btn" onclick="return confirm('Bạn có chắc chắn muốn xóa phòng này không?');" title="Xóa phòng"><i class="fa fa-trash"></i></a>
+                    <a href="index.php?room_id=<?= $room['id'] ?>&room_name=<?= urlencode($room['name']) ?>&room_type=<?= $room['type'] ?>&price=<?= $room['price'] ?>" style="text-decoration: none; color: inherit; display: flex; flex-direction: column; align-items: center; width: 100%;">
+                        <span class="badge"><?= $statusText ?></span>
+                        <i class="fa <?= $iconClass ?> icon-status"></i>
+                        <div class="room-name"><?= $room['name'] ?></div>
+                        <div class="room-type"><i class="fa fa-home"></i> <?= $room['type'] ?></div>
+                        <div class="room-price"><i class="fa fa-tag"></i> <?= number_format($room['price']) ?> VND/giờ</div>
+                        <?php if ($statusClass == 'occupied'): ?>
+                            <div class="room-timer" id="timer-<?= $room['id'] ?>"></div>
                         <?php endif; ?>
-                        <div class="price-badge"><?= number_format($p['price']) ?></div>
-                        <div class="prod-border" style="background: <?= $p['border'] ?>"></div>
-                    </div>
-                <?php endforeach; ?>
-            </div>
+                    </a>
+                </div>
+
+            <?php endforeach; else: ?>
+                <p>Không tìm thấy phòng nào phù hợp.</p>
+            <?php endif; ?>
+        </div>
+
+        <div class="legend">
+            <div>Chú thích trạng thái:</div>
+            <div><span class="dot" style="background: #69f0ae;"></span>Trống</div>
+            <div><span class="dot" style="background: #ff5252;"></span>Có khách</div>
         </div>
     </div>
-
-    <div class="modal" id="modal-customer">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Chọn Khách Hàng</h3>
-                <i class="fa fa-times" onclick="closeModal('modal-customer')" style="cursor: pointer;"></i>
-            </div>
-            
-            <div style="display: flex; gap: 10px;">
-                <input type="text" id="cust-search" class="cust-input" placeholder="Tìm tên hoặc SĐT..." onkeyup="filterCustomers()">
-            </div>
-
-            <div class="customer-list" id="customer-list-ui">
-                </div>
-
-            <div style="margin-top: 15px; border-top: 1px solid #444; padding-top: 10px;">
-                <h4>Thêm khách mới</h4>
-                <div style="display: flex; flex-direction: column; gap: 10px;">
-                    <div style="display: flex; gap: 10px;">
-                        <input type="text" id="new-cust-name" class="cust-input" placeholder="Tên khách hàng">
-                        <input type="text" id="new-cust-phone" class="cust-input" placeholder="Số điện thoại">
-                    </div>
-                    <input type="email" id="new-cust-email" class="cust-input" placeholder="Email (để gửi hóa đơn)">
-                    <button onclick="addCustomer()" style="background: var(--accent); border: none; color: white; padding: 10px; border-radius: 4px; cursor: pointer;">Thêm</button>
-                </div>
-            </div>
-        </div>
+    
+    <!-- The Modal -->
+    <div id="addRoomModal" class="modal">
+      <!-- Modal content -->
+      <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2><i class="fa fa-plus-circle"></i> Thêm phòng mới</h2>
+        <form action="add_room.php" method="post">
+            <label for="name">Tên phòng:</label>
+            <input type="text" id="name" name="name" placeholder="Ví dụ: Phòng 101" required>
+            <label for="type">Loại phòng:</label>
+            <input type="text" id="type" name="type" placeholder="Ví dụ: VIP, Thường" required>
+            <label for="price">Giá (VND/giờ):</label>
+            <input type="number" id="price" name="price" placeholder="Ví dụ: 100000" required min="0">
+            <input type="submit" value="Thêm phòng">
+        </form>
+      </div>
     </div>
 
-    <div class="modal" id="modal-payment">
-        <div class="modal-content">
-            <div class="pay-left">
-                <button onclick="closeModal('modal-payment')" style="background:none; border:none; color:#fff; font-size:16px; cursor:pointer; margin-bottom:20px;">
-                    <i class="fa fa-arrow-left"></i> Quay lại
-                </button>
-                <div class="numpad-pay">
-                    <div class="np-btn" onclick="payInput(1)">1</div><div class="np-btn" onclick="payInput(2)">2</div><div class="np-btn" onclick="payInput(3)">3</div>
-                    <div class="np-btn" onclick="payInput(4)">4</div><div class="np-btn" onclick="payInput(5)">5</div><div class="np-btn" onclick="payInput(6)">6</div>
-                    <div class="np-btn" onclick="payInput(7)">7</div><div class="np-btn" onclick="payInput(8)">8</div><div class="np-btn" onclick="payInput(9)">9</div>
-                    <div class="np-btn" onclick="payInput('00')">00</div><div class="np-btn" onclick="payInput(0)">0</div><div class="np-btn" onclick="payInput('del')">⌫</div>
-                </div>
-            </div>
-            <div class="pay-right">
-                <div style="color: #aaa;">Tiền món</div>
-                <div class="total-huge" id="pay-original-total">0 ₫</div>
-                
-                <div style="width: 100%; display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 16px;">
-                    <span>Thời gian sử dụng:</span> <span id="pay-time-display" style="color: #ffc107;">00:00:00</span>
-                </div>
-                <div style="width: 100%; display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 16px;">
-                    <span>Thành tiền giờ:</span> <span id="pay-time-cost" style="color: #ffc107;">0 ₫</span>
-                </div>
-                
-                <hr style="width: 100%; border: 1px dashed #555; margin-bottom: 10px;">
-
-                <div style="color: #aaa;">Tổng thanh toán</div>
-                <div class="total-huge" id="pay-total-display">0 ₫</div>
-                
-                <div style="width: 100%; display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 18px;">
-                    <span>Khách đưa:</span> <span id="pay-given-display" style="color: var(--accent);">0</span>
-                </div>
-                <div style="width: 100%; display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 18px; border-bottom: 1px solid #555; padding-bottom: 10px;">
-                    <span>Tiền thừa:</span> <span id="pay-change-display">0</span>
-                </div>
-
-                <div style="margin-bottom: 15px; width: 100%;">
-                    <i class="fa fa-user"></i> <span id="pay-cust-name">Khách</span>
-                    <br>
-                    <i class="fa fa-envelope"></i> <span id="pay-cust-email" style="font-size: 14px; color: #ccc;"></span>
-                </div>
-
-                <div id="processing-message" style="display: none; color: #ffc107; margin-bottom: 15px; font-weight: bold;">
-                    <i class="fa fa-spinner fa-spin"></i> Đang xử lý...
-                </div>
-
-                <button onclick="finishOrder()" style="width: 100%; padding:15px; background:var(--accent); color:#fff; border:none; font-size:18px; font-weight:bold; border-radius:5px; cursor:pointer;">
-                    <i class="fa fa-print"></i> Xác nhận
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // --- DATA ---
-        let cart = <?= json_encode($initial_cart) ?>;
-        // Lấy dữ liệu khách từ PHP
-        let customers = <?= json_encode($customers) ?>; 
-        const products = <?= json_encode($products) ?>;
-        
-        // --- STATE ---
-        let selectedIndex = -1; 
-        let currentMode = 'qty'; 
-        let buffer = ""; 
-        let totalAmount = 0;
-        let finalTotalAmount = 0; // Tổng tiền sau khi cộng tiền giờ
-        let givenAmount = 0;
-        let currentCustomer = <?= json_encode($initial_customer) ?>;
-        let currentRoomType = '<?= $currentRoomType ?>';
-        let currentRoomPrice = <?= $currentRoomPrice ?>; // Add this line
-
-        // --- HÀM LƯU TRẠNG THÁI ---
-        function saveOrderState() {
-            fetch('save_order.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    cart: cart,
-                    customer: currentCustomer
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (!data.success) {
-                    console.error('Lỗi khi lưu trạng thái đơn hàng.');
-                }
-            })
-            .catch(error => {
-                console.error('Lỗi hệ thống khi lưu trạng thái:', error);
-            });
-        }
-
-        // --- HÀM GIỎ HÀNG ---
-        function addProduct(id, name, price, cat = '', duration = 0) { // Added cat and duration parameters
-            let existing = cart.find(i => i.id === id);
-            if (existing) {
-                selectRow(cart.indexOf(existing));
-                updateItem('qty', existing.qty + 1);
-            } else {
-                // Check if a combo is already in the cart if adding another combo
-                if (cat === 'combo' && cart.some(item => item.cat === 'combo')) {
-                    alert('Chỉ được chọn một gói combo mỗi phòng.');
-                    return;
-                }
-                
-                cart.push({ id, name, price, qty: 1, discount: 0, cat: cat, duration: duration });
-                selectRow(cart.length - 1);
-                renderCart();
-                saveOrderState(); // Save state including initialRentedDuration
-            }
-        }
-
-        function selectRow(index) {
-            selectedIndex = index;
-            buffer = ""; 
-            setMode('qty'); 
-            renderCart();
-        }
-
-        // --- HÀM XỬ LÝ KHÁCH HÀNG ---
-        function updateCustomerDisplay() {
-            document.getElementById('current-customer-name').innerHTML = `<i class="fa fa-user"></i> ${currentCustomer.name}`;
-        }
-        
-        function openCustomerModal() {
-            document.getElementById('modal-customer').style.display = 'flex';
-            renderCustomerList();
-        }
-
-        function closeModal(id) {
-            document.getElementById(id).style.display = 'none';
-        }
-
-        function renderCustomerList() {
-            const list = document.getElementById('customer-list-ui');
-            list.innerHTML = `
-                <div class="cust-item" onclick="selectCustomer(0, 'Khách lẻ', '', '')">
-                    <b>Khách lẻ</b> <span>---</span>
-                </div>`;
+<script>
+    function updateTimers() {
+        const roomCards = document.querySelectorAll('.room-card.occupied');
+        roomCards.forEach(card => {
+            const startTime = parseInt(card.getAttribute('data-start-time'), 10);
+            const endTime = parseInt(card.getAttribute('data-end-time'), 10);
             
-            const term = document.getElementById('cust-search').value.toLowerCase();
-
-            customers.forEach(c => {
-                if(c.name.toLowerCase().includes(term) || c.phone.includes(term)) {
-                    list.innerHTML += `
-                    <div class="cust-item" onclick="selectCustomer(${c.id}, '${c.name}', '${c.phone}', c.email || '')">
-                        <b>${c.name}</b> <span>${c.phone}</span>
-                    </div>`;
-                }
-            });
-        }
-
-        function filterCustomers() { renderCustomerList(); }
-
-        function selectCustomer(id, name, phone, email) {
-            currentCustomer = { id, name, phone, email: email || '' };
-            updateCustomerDisplay();
-            closeModal('modal-customer');
-            saveOrderState(); // Lưu
-        }
-
-        function addCustomer() {
-            const name = document.getElementById('new-cust-name').value;
-            const phone = document.getElementById('new-cust-phone').value;
-            const email = document.getElementById('new-cust-email').value;
-            if(!name) return alert("Vui lòng nhập tên khách");
-
-            const newId = customers.length + 10;
-            const newCust = { id: newId, name: name, phone: phone, email: email };
-            customers.push(newCust);
-            
-            // Reset form
-            document.getElementById('new-cust-name').value = "";
-            document.getElementById('new-cust-phone').value = "";
-            document.getElementById('new-cust-email').value = "";
-            
-            // Chọn luôn khách mới
-            selectCustomer(newId, name, phone, email);
-        }
-
-        // --- LOGIC BÀN PHÍM ---
-        function setMode(mode) {
-            currentMode = mode;
-            buffer = ""; 
-            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('mode-' + mode).classList.add('active');
-        }
-
-        function pressNum(val) {
-            if (selectedIndex === -1) return;
-            buffer += val.toString();
-            updateItem(currentMode, parseFloat(buffer));
-        }
-
-        function pressBackspace() {
-            if (selectedIndex === -1) return;
-            buffer = buffer.slice(0, -1);
-            if (buffer === "") {
-                if (currentMode === 'qty') updateItem('qty', 1); // Không cho về 0
-                if (currentMode === 'disc') updateItem('disc', 0);
-            } else {
-                updateItem(currentMode, parseFloat(buffer));
-            }
-        }
-
-        function updateItem(type, value) {
-            let item = cart[selectedIndex];
-            if (!item) return;
-
-            if (type === 'qty') {
-                if (value <= 0) return; // Chặn số lượng <= 0
-                item.qty = value;
-            } else if (type === 'disc') {
-                if (value > 100) value = 100;
-                item.discount = value;
-            } else if (type === 'price') {
-                item.price = value;
-            }
-            renderCart();
-            saveOrderState();
-        }
-
-        // --- CÁC HÀM HÀNH ĐỘNG (XÓA, HỦY) ---
-        function deleteCurrentItem() {
-            if (selectedIndex === -1) return;
-            cart.splice(selectedIndex, 1);
-            selectedIndex = (cart.length > 0) ? 0 : -1;
-            renderCart();
-            saveOrderState();
-        }
-
-        function cancelOrder() {
-            if(confirm('Bạn có chắc muốn hủy toàn bộ đơn hàng?')) {
-                cart = [];
-                selectedIndex = -1;
-                currentCustomer = { id: 0, 'name': 'Khách lẻ', 'phone': '', 'email': '' };
-                saveOrderState();
-                
-                // Đợi một chút để request được gửi đi trước khi chuyển trang
-                setTimeout(() => {
-                    window.location.href = 'room.php';
-                }, 200);
-            }
-        }
-
-        // --- RENDER ---
-        function renderCart() {
-            const container = document.getElementById('cart-container');
-            container.innerHTML = '';
-            totalAmount = 0;
-
-            if (cart.length === 0) {
-                container.innerHTML = `<div style="text-align:center; padding:50px; color:#999">Giỏ hàng trống</div>`;
-                document.title = "POS System";
-                return;
-            }
-
-            cart.forEach((item, index) => {
-                let initialTotal = item.price * item.qty;
-                let finalTotal = initialTotal * (1 - item.discount / 100);
-                totalAmount += finalTotal;
-
-                let activeClass = (index === selectedIndex) ? 'active' : '';
-                let discountHtml = item.discount > 0 ? `<div class="discount-tag">Giảm ${item.discount}%</div>` : '';
-
-                container.innerHTML += `
-                <div class="cart-item ${activeClass}" onclick="selectRow(${index})">
-                    <div class="item-info">
-                        <div style="font-weight:bold">${item.name}</div>
-                        <div style="font-size:13px; color:#666">${item.qty} x ${item.price.toLocaleString()}</div>
-                        ${discountHtml}
-                    </div>
-                    <div class="item-total">
-                        <div>${finalTotal.toLocaleString()}</div>
-                        ${item.discount > 0 ? `<div style="font-size:11px; text-decoration:line-through; color:#aaa">${initialTotal.toLocaleString()}</div>` : ''}
-                    </div>
-                </div>`;
-            });
-            document.title = `${totalAmount.toLocaleString()}đ - POS`;
-        }
-
-        function filterCat(btn, catId) {
-            document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            document.querySelectorAll('.prod-card').forEach(p => {
-                if(catId === 'all' || p.dataset.cat === catId) p.style.display = 'flex';
-                else p.style.display = 'none';
-            });
-        }
-
-        // --- THANH TOÁN ---
-        function openPayment() {
-            if (cart.length === 0) return alert('Vui lòng chọn món!');
-            
-            const startTime = <?= isset($_SESSION['orders'][$currentRoomId]['start_time']) ? $_SESSION['orders'][$currentRoomId]['start_time'] : 0 ?>;
-            const endTime = <?= isset($_SESSION['orders'][$currentRoomId]['end_time']) ? $_SESSION['orders'][$currentRoomId]['end_time'] : 0 ?>;
-            let timeCost = 0;
-            let elapsedTimeString = "00:00:00";
-
-            if (startTime > 0) {
-                const now = (endTime > 0) ? endTime : Math.floor(Date.now() / 1000);
-                let elapsedTimeInSeconds = now - startTime;
-
-                // Trừ thời gian combo nếu có
-                const comboInCart = cart.find(item => item.cat === 'combo' && item.duration > 0);
-                if (comboInCart) {
-                    const comboDurationInSeconds = comboInCart.duration * 3600;
-                    elapsedTimeInSeconds = Math.max(0, elapsedTimeInSeconds - comboDurationInSeconds);
-                }
-
-                // Use the price from the session if available, otherwise fall back to old logic
-                const hourlyRate = currentRoomPrice > 0 ? currentRoomPrice : (products.find(p => p.cat === 'break' && p.name.includes(currentRoomType))?.price || 0);
-
-
-                if (hourlyRate > 0) {
-                    const hours = elapsedTimeInSeconds / 3600;
-                    timeCost = Math.ceil(hours) * hourlyRate; // Làm tròn lên giờ tiếp theo
-                }
-
-                // Format time string for display
-                const h = Math.floor(elapsedTimeInSeconds / 3600);
-                const m = Math.floor((elapsedTimeInSeconds % 3600) / 60);
-                const s = elapsedTimeInSeconds % 60;
-                elapsedTimeString = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-            }
-            
-            finalTotalAmount = totalAmount + timeCost;
-
-            document.getElementById('modal-payment').style.display = 'flex';
-            document.getElementById('pay-original-total').innerText = totalAmount.toLocaleString() + ' ₫';
-            document.getElementById('pay-time-display').innerText = elapsedTimeString;
-            document.getElementById('pay-time-cost').innerText = timeCost.toLocaleString() + ' ₫';
-            document.getElementById('pay-total-display').innerText = finalTotalAmount.toLocaleString() + ' ₫';
-            document.getElementById('pay-cust-name').innerText = currentCustomer.name;
-            document.getElementById('pay-cust-email').innerText = currentCustomer.email || 'Không có email';
-            givenAmount = 0;
-            updatePayUI();
-        }
-
-        function payInput(val) {
-            if(val === 'del') {
-                let s = givenAmount.toString();
-                givenAmount = parseInt(s.slice(0, -1)) || 0;
-            } else {
-                let s = givenAmount.toString() + val.toString();
-                givenAmount = parseInt(s);
-            }
-            updatePayUI();
-        }
-
-        function updatePayUI() {
-            document.getElementById('pay-given-display').innerText = givenAmount.toLocaleString();
-            let change = givenAmount - finalTotalAmount;
-            document.getElementById('pay-change-display').innerText = change.toLocaleString();
-        }
-
-        function finishOrder() {
-            if (givenAmount < finalTotalAmount && givenAmount !== 0) {
-                if (!confirm("Khách đưa thiếu tiền. Vẫn thanh toán?")) return;
-            }
-            
-            const processingMessage = document.getElementById('processing-message');
-            const confirmButton = document.querySelector('#modal-payment button[onclick="finishOrder()"]');
-
-            // Show processing message and disable button
-            processingMessage.style.display = 'block';
-            processingMessage.style.color = '#ffc107'; // Set to initial processing color
-            processingMessage.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Đang xử lý...'; // Reset text
-            confirmButton.disabled = true;
-
-            const timeCost = parseFloat(document.getElementById('pay-time-cost').innerText.replace(/[^0-9]/g, ''));
-            const elapsedTimeString = document.getElementById('pay-time-display').innerText;
-
-            const invoiceData = {
-                customer: currentCustomer,
-                roomName: '<?= htmlspecialchars($currentRoomName, ENT_QUOTES) ?>',
-                items: cart,
-                total: finalTotalAmount,
-                given: givenAmount,
-                change: givenAmount - finalTotalAmount,
-                user: '<?= htmlspecialchars($currentUser, ENT_QUOTES) ?>',
-                sendEmail: false,
-                time_info: {
-                    duration: elapsedTimeString,
-                    cost: timeCost
-                }
-            };
-
-            if (currentCustomer && currentCustomer.email) {
-                if (confirm(`Gửi hóa đơn đến email ${currentCustomer.email}?`)) {
-                    invoiceData.sendEmail = true;
-                }
-            }
-            
-            fetch('process_checkout.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(invoiceData)
-            })
-            .then(response => response.json())
-            .then(data => {
-                let displayMessage = ``;
-                let iconClass = '';
-
-                if (data.email_status === true) {
-                    iconClass = 'fa fa-check-circle';
-                    displayMessage = `Đã gửi.`;
-                    processingMessage.style.color = '#28a745'; // Success color
-                } else if (data.email_status === false) {
-                    iconClass = 'fa fa-exclamation-triangle';
-                    displayMessage = `Lưu ý: ${data.email_message}`;
-                    processingMessage.style.color = '#ffc107'; // Warning color
-                } else {
-                    iconClass = 'fa fa-check-circle'; // Default success for checkout even if no email
-                    displayMessage = `Đã thanh toán cho ${currentCustomer.name}!`;
-                    processingMessage.style.color = '#28a745'; // Success color
-                }
-                
-                processingMessage.innerHTML = `<i class="${iconClass}"></i> ${displayMessage}`;
-
-                setTimeout(() => {
-                    processingMessage.style.display = 'none';
-                    confirmButton.disabled = false;
-                    resetOrder();
-                }, 2000); // Display message for 2 seconds
-            })
-            .catch(error => {
-                console.error('Checkout Error:', error);
-                processingMessage.innerHTML = `<i class="fa fa-times-circle"></i> Đã xảy ra lỗi nghiêm trọng trong quá trình thanh toán.`;
-                processingMessage.style.color = '#dc3545'; // Error color
-                
-                setTimeout(() => {
-                    processingMessage.style.display = 'none';
-                    confirmButton.disabled = false;
-                    resetOrder();
-                }, 3000); // Display error message for 3 seconds
-            });
-        }
-
-        function resetOrder() {
-             cart = [];
-            selectedIndex = -1;
-            currentCustomer = { id: 0, name: 'Khách lẻ', phone: '', email: '' };
-            saveOrderState(); // Xóa trạng thái trong session
-            renderCart();
-            updateCustomerDisplay();
-            closeModal('modal-payment');
-        }
-
-        // --- KHỞI TẠO KHI TẢI TRANG ---
-        document.addEventListener('DOMContentLoaded', function() {
-            updateCustomerDisplay();
-            renderCart();
-            const firstCatBtn = document.querySelector('.cat-btn');
-            if (firstCatBtn) {
-                filterCat(firstCatBtn, 'all');
-            }
-            updateRoomTimer();
-            setInterval(updateRoomTimer, 1000);
-        });
-
-        function updateRoomTimer() {
-            const startTime = <?= isset($_SESSION['orders'][$currentRoomId]['start_time']) ? $_SESSION['orders'][$currentRoomId]['start_time'] : 0 ?>;
-            const endTime = <?= isset($_SESSION['orders'][$currentRoomId]['end_time']) ? $_SESSION['orders'][$currentRoomId]['end_time'] : 0 ?>;
-            
-            if (startTime === 0) return;
+            if (isNaN(startTime) || startTime === 0) return;
 
             let now;
-            if (endTime === 0) { // If timer is still running
+            if (isNaN(endTime) || endTime === 0) { // If timer is still running
                 now = Math.floor(Date.now() / 1000);
-                document.getElementById('stop-timer-btn').style.display = 'inline-block';
             } else { // If timer has been stopped
                 now = endTime;
-                document.getElementById('stop-timer-btn').style.display = 'none';
             }
             
             const elapsedTime = now - startTime;
@@ -779,38 +411,44 @@ $customers = [
             const minutes = Math.floor((elapsedTime % 3600) / 60);
             const seconds = elapsedTime % 60;
 
-            const timerElement = document.getElementById('room-timer');
+            const timerElement = card.querySelector('.room-timer');
             if (timerElement) {
                 timerElement.innerHTML = `<i class="fa fa-clock"></i> ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
             }
+        });
+    }
+
+    setInterval(updateTimers, 1000);
+    document.addEventListener('DOMContentLoaded', function() {
+        updateTimers();
+
+        // Auto-hide notification
+        const notification = document.getElementById('notification-banner');
+        if (notification) {
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => notification.style.display = 'none', 500);
+            }, 5000); // Hide after 5 seconds
         }
 
-        function stopRoomTimer() {
-            if (confirm('Bạn có chắc chắn muốn dừng tính giờ cho phòng này? Thời gian sẽ được chốt lại.')) {
-                fetch('finalize_room_time.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ roomId: <?= $currentRoomId ?> })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        alert('Đã dừng tính giờ. Thời gian sẽ được chốt khi thanh toán.');
-                        // Reload the page to reflect the end_time in PHP session and update UI
-                        location.reload(); 
-                    } else {
-                        alert('Lỗi khi dừng tính giờ: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    console.error('Lỗi AJAX khi dừng tính giờ:', error);
-                    alert('Lỗi hệ thống khi dừng tính giờ.');
-                });
-            }
+        // Modal script
+        var modal = document.getElementById("addRoomModal");
+        var btn = document.getElementById("addRoomBtn");
+        var span = document.getElementsByClassName("close")[0];
+
+        btn.onclick = function() {
+          modal.style.display = "block";
         }
-    </script>
-</body>
-</html>
+        span.onclick = function() {
+          modal.style.display = "none";
+        }
+        window.onclick = function(event) {
+          if (event.target == modal) {
+            modal.style.display = "none";
+          }
+        }
+    });
+</script>
 
 </body>
 </html>
